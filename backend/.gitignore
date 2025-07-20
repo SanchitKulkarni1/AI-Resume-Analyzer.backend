@@ -1,0 +1,45 @@
+# Bytecode and Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment 
+# Replace 'venv' with the name of your virtual environment directory if it's different
+venv/
+.venv/
+env/
+.env/
+ENV/
+.env.*
+!.env.example
+
+# IDE / Editor directories
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Build, distribution, and testing artifacts
+/build/
+/dist/
+*.egg-info/
+/htmlcov/
+.coverage
+.pytest_cache/
+.tox/
+
+# Secrets & Sensitive Files (IMPORTANT)
+# Never commit your secrets. Use environment variables.
+*.env
+secrets.toml
+.secrets
+config.ini
+instance/
+
+# Log files
+*.log
+logs/
+
+# OS-generated files
+.DS_Store
+Thumbs.db

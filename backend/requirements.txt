@@ -1,0 +1,8 @@
+flask
+langchain
+chromadb
+pdfplumber
+python-dotenv
+sentence-transformers
+openai
+
