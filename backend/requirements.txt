@@ -1,8 +1,10 @@
-flask
-langchain
-chromadb
+fastapi
+uvicorn
 pdfplumber
-python-dotenv
+chromadb==1.0.15
+langchain
+langchain-community
+langchain-huggingface
 sentence-transformers
 openai
 fastapi
