@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: resume-analyzer-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    plan: free
+    envVars:
+      - key: HUGGINGFACEHUB_API_TOKEN
+        value: your_token_here
+    disk:
+      name: chroma-disk
+      mountPath: /mnt/data
+      sizeGB: 1
