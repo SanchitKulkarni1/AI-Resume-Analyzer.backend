@@ -1,7 +1,6 @@
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
-# No longer need to import LLMChain
 import os
 
 load_dotenv()
@@ -12,7 +11,7 @@ llm = ChatOpenAI(
     openai_api_base="https://openrouter.ai/api/v1"
 )
 
-def suggest_resume_improvements(resume_text):
+async def suggest_resume_improvements(resume_text):
     prompt = PromptTemplate.from_template("""
     You are a professional resume reviewer.
     
@@ -59,12 +58,7 @@ def suggest_resume_improvements(resume_text):
 - Return only the structured **Markdown content** as output.
 """)
 
-    # --- This is the new, updated section ---
-
-    # 1. Create the chain using the pipe operator (LCEL)
     chain = prompt | llm
 
-    # 2. Call the chain using .invoke() with a dictionary input
-    # The key 'resume_text' must match the variable in your prompt template.
-    result = chain.invoke({"resume_text": resume_text})
+    result = await chain.ainvoke({"resume_text": resume_text})
     return result.content 
