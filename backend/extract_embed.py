@@ -47,7 +47,10 @@ load_dotenv()
 # Chroma DB path (recommended for Render Free Tier) # or just "chroma" locally
 
 # Load the Cohere embedding model once
-embedding_model = CohereEmbeddings(cohere_api_key=os.getenv("COHERE_API_KEY"))
+embedding_model = CohereEmbeddings(
+    cohere_api_key=os.getenv("COHERE_API_KEY"),
+    user_agent="my-resume-analyzer/1.0"
+)
 
 # ✅ PDF Text Extraction
 async def extract_text(file: UploadFile) -> str:
