@@ -35,19 +35,21 @@
 
 import uuid
 import pdfplumber
-from langchain_community.vectorstores import Chroma
-from dotenv import load_dotenv
-from fastapi import UploadFile
-from langchain.embeddings import HuggingFaceEmbeddings
 import os
+from fastapi import UploadFile
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import CohereEmbeddings
+from dotenv import load_dotenv
 
-# Load env vars
+# Load environment variables
 load_dotenv()
 
-# ✅ CHROMA storage path (for Render: use /mnt/data)
-  # Make sure Render uses a mounted disk for this path
+# Chroma DB path (recommended for Render Free Tier) # or just "chroma" locally
 
-# ✅ Extract text from PDF
+# Load the Cohere embedding model once
+embedding_model = CohereEmbeddings(cohere_api_key=os.getenv("COHERE_API_KEY"))
+
+# ✅ PDF Text Extraction
 async def extract_text(file: UploadFile) -> str:
     try:
         file.file.seek(0)
@@ -56,18 +58,13 @@ async def extract_text(file: UploadFile) -> str:
     except Exception as e:
         raise ValueError(f"Failed to parse PDF: {e}")
 
-# ✅ Embed and store resume text using HuggingFace
+# ✅ Embedding Function
 async def embed_resume(resume_text: str):
     try:
-        embedding_model = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
-        )
-
         vectordb = Chroma.from_texts(
             [resume_text],
             embedding=embedding_model,
         )
-
         return vectordb
     except Exception as e:
         raise RuntimeError(f"Failed to create embedding: {e}")
