@@ -1,144 +1,159 @@
-# main.py - Your new FastAPI application
-
-import os
 import json
 import re
 import logging
 from dotenv import load_dotenv
+from typing import Any, Dict
 
 from fastapi import (
-    FastAPI, 
-    UploadFile, 
-    File, 
-    Form, 
-    HTTPException, 
-    status
+    FastAPI,
+    UploadFile,
+    File,
+    Form,
+    HTTPException,
+    status,
 )
 from fastapi.middleware.cors import CORSMiddleware
 
-# --- IMPORTANT ---
-# You must update these imported functions to be 'async def' functions
-# and use an async library like 'httpx' for API calls inside them.
 from extract_embed import extract_text
-from parsing_summary import analyze_resume, parse_resume
+from parsing_summary import parse_resume, analyze_resume
 from suggestion import suggest_resume_improvements
 from roadmap import generate_roadmap
 
-# Load environment variables from a .env file
+# --------------------------------------------------
+# Setup
+# --------------------------------------------------
+
 load_dotenv()
 
-# Configure basic logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("resume-analyzer")
 
-# Initialize the FastAPI app
-app = FastAPI()
+app = FastAPI(title="Resume Analyzer API")
 
-# --- CORS Middleware ---
-# This allows your frontend to communicate with this backend.
-# Update 'allow_origins' to your specific frontend URL in production.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins for now, restrict in production
+    allow_origins=["*"],  # restrict in prod
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+# --------------------------------------------------
+# Utilities
+# --------------------------------------------------
+
+def extract_json_from_text(text: str) -> Dict[str, Any]:
+    """
+    Robust JSON extractor for LLM output.
+    Supports:
+    - clean JSON
+    - JSON wrapped in text
+    - markdown-fenced JSON
+    """
+
+    # Remove markdown fences
+    text = re.sub(r"```json|```", "", text, flags=re.IGNORECASE).strip()
+
+    # Try direct parse first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Try object
+    obj_match = re.search(r"\{[\s\S]*?\}", text)
+    if obj_match:
+        return json.loads(obj_match.group())
+
+    raise ValueError("No valid JSON found in LLM output")
+
+
+async def parse_resume_with_retry(resume_text: str, retries: int = 1) -> Dict[str, Any]:
+    """
+    Calls parse_resume LLM and enforces JSON contract with retry.
+    """
+    last_error = None
+
+    for attempt in range(retries + 1):
+        raw_output = await parse_resume(resume_text)
+
+        try:
+            return extract_json_from_text(raw_output)
+        except Exception as e:
+            logger.error("❌ Resume parsing failed (attempt %d)", attempt + 1)
+            logger.error("RAW LLM OUTPUT:\n%s", raw_output)
+            last_error = e
+
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Failed to parse resume into structured JSON."
+    )
+
+
+# --------------------------------------------------
+# Routes
+# --------------------------------------------------
+
 @app.get("/")
-async def home():
-    """A simple root endpoint to confirm the API is running."""
-    return {"message": "Resume Analyzer API is running!"}
+async def health_check():
+    return {"status": "Resume Analyzer API running"}
 
 
 @app.post("/analyze")
 async def analyze_resume_endpoint(
-    # FastAPI uses dependency injection to get the file and form data.
-    # This is more secure and provides better validation than Flask's request object.
-    resume: UploadFile = File(..., description="The user's resume file (PDF, DOCX)."), 
-    job_description: str = Form(..., description="The job description to compare against.")
+    resume: UploadFile = File(...),
+    job_description: str = Form(...)
 ):
-    """
-    Analyzes a resume against a job description, providing a score,
-    analysis, suggestions, and a roadmap for improvement.
-    """
-    logger.info("Received request for /analyze")
+    logger.info("📥 /analyze request received")
 
-    # FastAPI handles basic validation, but we can add checks.
-    if not resume or not resume.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
-            detail="No resume file uploaded."
-        )
-    
-    if not job_description:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
-            detail="Job description is required."
-        )
+    if not resume.filename:
+        raise HTTPException(400, "Resume file missing")
 
     try:
-        # Read the file content asynchronously
-        file_contents = await resume.read()
-        
-        # This function should be able to handle bytes from the uploaded file
+        # 1️⃣ Extract resume text
         resume_text = await extract_text(resume)
-        logger.info(f"Extracted text from {resume.filename}")
+        logger.info("📄 Extracted text from %s", resume.filename)
 
-        # --- Asynchronous LLM Calls ---
-        # Each of these functions should now be an 'async def' function.
-        # 'await' pauses this function, allowing the server to handle other requests.
-        logger.info("Calling LLM for parsing...")
-        raw_parsed_string = await parse_resume(resume_text)
-        
-        logger.info("Calling LLM for analysis...")
-        analysis_results_dict = await analyze_resume(resume_text, job_description)
-        
-        logger.info("Calling LLM for suggestions...")
-        suggestions_string = await suggest_resume_improvements(resume_text)
+        # 2️⃣ Parse resume → structured JSON (with retry)
+        logger.info("🧠 Parsing resume with LLM")
+        parsed_resume = await parse_resume_with_retry(resume_text, retries=1)
 
-        score = analysis_results_dict.get("score")
-        analysis_text = analysis_results_dict.get("analysis")
-        
-        # Find the JSON object within the potentially messy LLM string
-        match = re.search(r"\{.*\}", raw_parsed_string, re.DOTALL)
-        if not match:
-            logger.error("LLM output for parsing did not contain a valid JSON object.")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-                detail="Failed to parse resume content from LLM output."
-            )
-        
-        clean_json_string = match.group(0)
-        parsed_data = json.loads(clean_json_string)
+        # 3️⃣ Analyze vs job description
+        logger.info("📊 Analyzing resume vs JD")
+        analysis = await analyze_resume(resume_text, job_description)
 
-        logger.info("Calling LLM for roadmap generation...")
-        roadmap_string = await generate_roadmap(parsed_data, analysis_text, job_description, score)
+        score = analysis.get("score")
+        analysis_text = analysis.get("analysis")
 
-        # Assemble the final response
-        final_response = {
-            "parsed": parsed_data,
+        # 4️⃣ Suggestions
+        logger.info("💡 Generating improvement suggestions")
+        suggestions = await suggest_resume_improvements(resume_text)
+
+        # 5️⃣ Roadmap
+        logger.info("🛣️ Generating learning roadmap")
+        roadmap = await generate_roadmap(
+            parsed_resume,
+            analysis_text,
+            job_description,
+            score
+        )
+
+        logger.info("✅ Analysis completed successfully")
+
+        return {
+            "parsed": parsed_resume,
             "analysis": analysis_text,
             "score": score,
-            "suggestions": suggestions_string,
-            "roadmap": roadmap_string
+            "suggestions": suggestions,
+            "roadmap": roadmap,
         }
-        
-        logger.info("Successfully completed analysis.")
-        return final_response
 
-    except json.JSONDecodeError:
-        logger.error("LLM returned malformed JSON after cleaning.")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="LLM returned malformed JSON."
-        )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"An unexpected error occurred in /analyze: {e}", exc_info=True)
+        logger.exception("🔥 Unexpected error in /analyze")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"An unexpected error occurred: {e}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error while analyzing resume."
         )
-
-# Note: You don't need the 'if __name__ == "__main__":' block.
-# You will run this server using Gunicorn in production.
